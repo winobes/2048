@@ -1,6 +1,7 @@
 module Game2048 where
 
 import Data.List (findIndices)
+import Data.Maybe (fromJust)
 import System.Random
 
 type Tile = Maybe Int
@@ -23,8 +24,8 @@ putCol :: Int -> [Tile] -> Board -> Board
 putCol i c b | validIndex i = [update i (c!!j) (b!!j) | j <- [0..3]]
              | otherwise = error "invalud column"
 
-putTile :: Tile -> Board -> (Int, Int) -> Board
-putTile x b (i, j) = putRow i (update j x (b!!i)) b
+putTile :: Tile -> (Int, Int) -> Board -> Board
+putTile x (i, j) b = putRow i (update j x (b!!i)) b
 
 -- The modify functions take a function that operates on a list of tiles 
 -- and uniformly applies it to all of the rows/colums of the board.
@@ -51,7 +52,7 @@ pileR []                = []
 combineL :: [Tile] -> [Tile]
 combineL (Just x : Just y : rest) 
   | x == y    = Just (x+1) : combineL rest ++ [Nothing]
-  | otherwise =  Just x : combineL (Just y : rest)
+  | otherwise = Just x : combineL (Just y : rest)
 combineL (x : rest) = x : combineL rest
 combineL [] = []
 
@@ -74,14 +75,15 @@ emptyCells :: Board -> [(Int, Int)]
 emptyCells b = concat [go i [] (b!!i) | i <- [0..3]]
   where go i cs xs = map (\j -> (i,j)) (findIndices (==Nothing) xs)
 
-randomPick :: [a] -> IO a
-randomPick xs = fmap ((!!) xs) i
-  where i = getStdRandom (randomR (0, l))
+randomPick :: RandomGen g => [a] -> g -> (a, g)
+randomPck [] _ = error "picking from empyt list"
+randomPick xs g = (xs!!i, g')
+  where (i, g') = randomR (0, l) g
         l = (length xs) - 1
 
-randomPlace :: Board -> IO Board
-randomPlace b = fmap (putTile (Just 1) b) cell
-  where cell = randomPick (emptyCells b)
+randomPlace :: RandomGen g => Board -> g -> (Board, g)
+randomPlace b g = ((putTile (Just 1) cell b), g')
+  where (cell, g') = randomPick (emptyCells b) g
 
 initBoard :: Board
 initBoard = replicate 4 (replicate 4 Nothing)
@@ -112,22 +114,38 @@ showTile (Just n) = (replicate i ' ') ++ s
 
 main :: IO ()
 main = do 
-  let board = initBoard
-  gameLoop (return board)
-  putStrLn "Done."
+  gameLoop (initBoard, (mkStdGen 14))
 
-gameLoop :: IO Board -> IO Board
-gameLoop board = do
-  fmap showBoard board >>= putStr
-  if False 
-    then board
-    else do
-           c <- getChar
-           putStrLn $ ""
-           case c of
-             'A' -> gameLoop $ (fmap goU) board >>= randomPlace
-             'B' -> gameLoop $ (fmap goD) board >>= randomPlace
-             'C' -> gameLoop $ (fmap goR) board >>= randomPlace
-             'D' -> gameLoop $ (fmap goL) board >>= randomPlace
-             _   -> gameLoop board
+gameLoop :: RandomGen g => (Board,  g) -> IO ()
+gameLoop (board, g) = do
+  updateGraphics board
+  c <- getChar
+  let (newBoard, g', continue) = updateBoard c (board, g)
+  if continue
+    then gameLoop (newBoard, g)
+    else putStrLn "Game Over."
+
+updateGraphics :: Board -> IO ()
+updateGraphics board = do
+  putStrLn "" 
+  putStr $ showBoard board
+    
+updateBoard :: RandomGen g => Char -> (Board, g) -> (Board, g, Bool)
+updateBoard c (board, g) = do
+  let (newBoard, moved) = makeMove c board
+  if emptyCells newBoard == []
+    then (board, g, False)
+    else if moved
+           then let (b, g') = randomPlace newBoard g in (b, g', True)
+           else (newBoard, g, True)
+
+makeMove :: Char -> Board -> (Board, Bool)
+makeMove c board =
+  case c of
+    'A' -> (goU board, True)
+    'B' -> (goD board, True)
+    'C' -> (goR board, True)
+    'D' -> (goL board, True)
+    _   -> (board, False)
+
 
