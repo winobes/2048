@@ -51,12 +51,15 @@ main = do
 gameLoop :: Player p => p -> Board -> Score -> StdGen -> IO ()
 gameLoop p b s g = do
   m  <- getMove p 
-  if isValid m b
+  if isValid b m
     then do (b', s', g') <- return $ updateBoard m b s g
-            p'           <- return $ updatePlayer p b'
             updateGraphics b' s'
-            gameLoop p' b' s' g'
+      if any (isValid b') [L, R, U, D]
+        then do p' <- return $ updatePlayer p b'
+                gameLoop p' b' s' g'
+        else do putStr "Game Over."
     else do gameLoop p  b  s  g
+            
 
 updateGraphics :: Board -> Score -> IO ()
 updateGraphics b s = do putStr $ "\n" ++ show s ++ "\n" ++ showBoard b 
