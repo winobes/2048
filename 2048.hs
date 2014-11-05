@@ -1,92 +1,62 @@
 module Main where
 
-import Data.List (findIndices)
-import Data.Maybe (fromJust, isJust)
-import Control.Monad (when)
+import Data.Maybe (isNothing, fromJust)
+import Data.List (findIndices, transpose)
 import System.Random
 import System.IO
 
-type Tile = Maybe Int
-
+type Tile = Int
 type Board = [[Tile]]
+data Move = L | R | U | D
 
-validIndex :: Int -> Bool
-validIndex i = i < 4 && i > -1 
+pile :: [Tile] -> [Tile] 
+pile r = tiles ++ spaces 
+  where tiles  = filter (/=0) r
+        spaces = filter (==0) r 
 
-update :: Int -> a -> [a] -> [a]
-update _ _ [] = []
-update 0 y (x:xs) = y:xs
-update n y (x:xs) = x : update (n - 1) y xs
+merge :: Int -> [Tile] -> ([Tile], Int) 
+merge n (x : 0 : rest) = let (rest', n') = merge n rest in (x:0:rest', n')
+merge n (x : y : rest)
+  | x == y    = let (rest', n') = merge n rest     in ((x+y):rest' ++ [0], n'+x+y)
+  | otherwise = let (rest', n') = merge n (y:rest) in (x:rest', n')
+merge n rest = (rest, n)
 
-putRow :: Int -> [Tile] -> Board -> Board
-putRow i r b | validIndex i = update i r b
-             | otherwise = error "invalud row"
+pileMerge :: [Tile] -> ([Tile], Int) 
+pileMerge r = merge 0 (pile r)
 
-putCol :: Int -> [Tile] -> Board -> Board
-putCol i c b | validIndex i = [update i (c!!j) (b!!j) | j <- [0..3]]
-             | otherwise = error "invalud column"
+isValid :: Move -> Board -> Bool
+isValid m b = (map pile b) /= b
 
-putTile :: Tile -> (Int, Int) -> Board -> Board
-putTile x (i, j) b = putRow i (update j x (b!!i)) b
-
--- The modify functions take a function that operates on a list of tiles 
--- and uniformly apply it to all of the rows/colums of a board.
-
-modifyRow :: ([Tile] -> [Tile]) -> Board -> Board
-modifyRow f b = foldr (\i b -> putRow i (f (b!!i)) b) b [0..3]
-
-modifyCol :: ([Tile] -> [Tile]) -> Board -> Board
-modifyCol f b = foldr (\i b -> putCol i (f [b!!j!!i | j <- [0..3]]) b) b [0..3]
-
-pileL :: [Tile] -> [Tile]
-pileL xs = tiles ++ replicate n Nothing
-  where tiles = filter (isJust) xs  
-        n = 4 - length tiles
-
-pileR :: [Tile] -> [Tile]
-pileR xs =  replicate n Nothing ++ tiles
-  where tiles = filter (isJust) xs
-        n = 4 - length tiles
-
-combineL :: [Tile] -> [Tile]
-combineL (Just x : Just y : rest) 
-  | x == y    = Just (x+1) : combineL rest ++ [Nothing]
-  | otherwise = Just x : combineL (Just y : rest)
-combineL (x : rest) = x : combineL rest
-combineL [] = []
-
-combineR :: [Tile] -> [Tile]
-combineR = reverse . combineL . reverse
-
-goL :: Board -> Board
-goL = modifyRow (combineL . pileL)
- 
-goU :: Board -> Board
-goU = modifyCol (combineL . pileL)
-
-goR :: Board -> Board
-goR = modifyRow (combineR . pileR) 
-
-goD :: Board -> Board
-goD = modifyCol (combineR . pileR) 
+move :: Move -> Board  -> (Board, Int)
+move L b = let (b', as) = unzip $ map pileMerge b in (b', sum as)
+move R b = let (b', a)  = move L (map reverse b)  in (map reverse b', a)
+move U b = let (b', a)  = move R (transpose b)    in (transpose b', a)
+move D b = let (b', a)  = move L (transpose b)    in (transpose b', a)
 
 emptyCells :: Board -> [(Int, Int)]
-emptyCells b = concat [go i [] (b!!i) | i <- [0..3]]
-  where go i cs xs = map (\j -> (i,j)) (findIndices (==Nothing) xs)
+emptyCells b = concat [inRow i [] (b!!i) | i <- [0..3]]
+  where inRow i cs xs = map (\j -> (i,j)) (findIndices (==0) xs)
 
 randomPick :: RandomGen g => [a] -> g -> (a, g)
-randomPck [] _ = error "picking from empyt list"
+randomPick [] _ = error "picking from empty list"
 randomPick xs g = (xs!!i, g')
   where (i, g') = randomR (0, l) g
         l = (length xs) - 1
 
-randomPlace :: RandomGen g => Board -> g -> (Board, g)
-randomPlace b g = ((putTile tile cell b), g'')
-  where (cell, g')  = randomPick (emptyCells b) g
-        (tile, g'') = randomPick [Just 1, Just 2] g'
+placeTile :: Tile -> (Int, Int) -> Board -> Board
+placeTile t (i, 0) (r:rs) = (inRow t i r) : rs
+  where inRow t 0 (x:xs) = t:xs
+        inRow t i (x:xs) = x : inRow t (i-1) xs
+placeTile t (i, j) (r:rs) = r : placeTile t (i, j-1) rs
+placeTile _ _ [] = error "invalid row index"
 
-initBoard :: Board
-initBoard = replicate 4 (replicate 4 Nothing)
+randomPlace :: RandomGen g => Board -> g -> (Board, g)
+randomPlace b g = ((placeTile tile cell b), g'')
+  where (cell, g')  = randomPick (emptyCells b) g
+        (tile, g'') = randomPick [2, 4] g'
+
+emptyBoard :: Board
+emptyBoard = replicate 4 (replicate 4 0)
 
 showBoard :: Board -> String
 showBoard b = 
@@ -107,54 +77,37 @@ showRow r = "|" ++ showTile (r!!0)
          ++ "|" ++ showTile (r!!3)
 
 showTile :: Tile -> String
-showTile Nothing  = "    "
-showTile (Just n) = (replicate i ' ') ++ s
-  where s = show (2^n)
+showTile 0  = "    "
+showTile n = (replicate i ' ') ++ s
+  where s = show n
         i = 4 - (length s)
 
-data GameState = GS Board Int StdGen Bool
+data GameState = GS { board :: Board
+                    , score :: Int
+                    , g     :: StdGen
+                    }
 
 main :: IO ()
 main = do 
   hSetBuffering stdin NoBuffering
-  let (b, g) = randomPlace initBoard (mkStdGen 14)
-      gS = GS b 0 g True 
+  let (b, g) = randomPlace emptyBoard (mkStdGen 14)
+      gS = GS b 0 g
   updateGraphics gS
   gameLoop gS
 
 gameLoop :: GameState -> IO ()
 gameLoop gS = do
-  c <- getChar
+  c <- return R 
   let gS' = updateBoard c gS 
   updateGraphics gS'
-  if win gS' || loose gS' 
+  if False
     then putStrLn "Game Over."
     else gameLoop gS'
 
 updateGraphics :: GameState -> IO ()
-updateGraphics (GS board score g moved) = do
-  when moved $ putStr $ "\n" ++ show score
-                     ++ "\n" ++ showBoard board
+updateGraphics gs = do putStr $ "\n" ++ show (score gs) ++ "\n" ++ showBoard (board gs)
                       
-updateBoard :: Char -> GameState -> GameState 
-updateBoard c (GS board score g _) | board == boardM = GS board score g  False 
-                                   | otherwise       = GS board' score' g' True
-  where boardM = move c board  
-        score' = score + 1
-        (board', g') = randomPlace boardM g
-
--- TODO: make winning possible
-win :: GameState -> Bool
-win (GS board _ _ _) = False
-
-loose :: GameState -> Bool
-loose (GS board _ _ _ ) = (null $ emptyCells board)
-                    &&  all (\f -> f board == board) [goU, goD, goR, goL]
-
-move :: Char -> (Board -> Board)
-move 'A' = goU
-move 'B' = goD
-move 'C' = goR
-move 'D' = goL
-move  _  = id
-
+updateBoard :: Move -> GameState -> GameState 
+updateBoard m gs@(GS b s g) = GS b'' (s+s') g'
+  where (b', s')  = move m b
+        (b'', g') = randomPlace b' g
