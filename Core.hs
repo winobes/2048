@@ -22,8 +22,8 @@ merge n rest = (rest, n)
 pileMerge :: [Tile] -> ([Tile], Score) 
 pileMerge r = merge 0 (pile r)
 
-isValid :: Move -> Board -> Bool
-isValid m b = b' /= b
+isValid :: Board -> Move -> Bool
+isValid b m = b' /= b
   where (b', _) = move m b
 
 move :: Move -> Board  -> (Board, Score)
@@ -33,10 +33,10 @@ move U b = let (b', a)  = move L (transpose b)    in (transpose b', a)
 move D b = let (b', a)  = move R (transpose b)    in (transpose b', a)
 
 placeTile :: Tile -> (Int, Int) -> Board -> Board
-placeTile t (i, 0) (r:rs) = (inRow t i r) : rs
+placeTile t (0, j) (r:rs) = (inRow t j r) : rs
   where inRow t 0 (x:xs) = t:xs
-        inRow t i (x:xs) = x : inRow t (i-1) xs
-placeTile t (i, j) (r:rs) = r : placeTile t (i, j-1) rs
+        inRow t j (x:xs) = x : inRow t (j-1) xs
+placeTile t (i, j) (r:rs) = r : placeTile t (i-1, j) rs
 placeTile _ _ [] = error "invalid row index"
 
 emptyCells :: Board -> [(Int, Int)]
